@@ -61,7 +61,6 @@ impl<T: RconImpl + std::marker::Send + 'static> RconServer<T> {
             let mut serv = ServerSession::from_tcp_stream(socket, implimentor);
 
             let _h = tokio::spawn(async move {
-                //serv.start().await;
                 let _ = serv
                     .start()
                     .map(|x| async {
@@ -75,24 +74,17 @@ impl<T: RconImpl + std::marker::Send + 'static> RconServer<T> {
 }
 
 pub struct ServerSession<T: RconImpl> {
-
-    writer: FramedWrite<tcp::OwnedWriteHalf, PacketCodec>,
-    reader: FramedRead<tcp::OwnedReadHalf, PacketCodec>,
+    stream: Framed<TcpStream, PacketCodec>,
     authenticated: bool,
     execer: Arc<Mutex<T>>,
 }
 
 impl<T: RconImpl> ServerSession<T> {
     pub fn from_tcp_stream(stream: TcpStream, execer: T) -> ServerSession<T> {
-        let (raw_reader, raw_writer) = stream.into_split();
-
-        let reader = FramedRead::new(raw_reader, PacketCodec::new());
-
-        let writer = FramedWrite::new(raw_writer, PacketCodec::new());
+        let stream = Framed::new(stream, PacketCodec::new_server());
 
         ServerSession {
-            reader,
-            writer,
+            stream,
             execer: Arc::new(Mutex::new(execer)),
             authenticated: false,
         }
@@ -103,7 +95,7 @@ impl<T: RconImpl> ServerSession<T> {
         debug!("starting client loop");
         loop {
             let authenticated = self.authenticated;
-            let m = self.reader.next().await;
+            let m = self.stream.next().await;
             debug!("recieved packet {:?}", m);
             match m {
                 Some(Ok(s)) if s.ptype == PacketType::ExecCommand && authenticated => {
@@ -114,7 +106,7 @@ impl<T: RconImpl> ServerSession<T> {
                         id: s.id,
                         body: r.unwrap(),
                     };
-                    let _ = self.writer.send(p).await;
+                    let _ = self.stream.send(p).await;
                 }
                 Some(Ok(s)) if s.ptype == PacketType::Auth && !authenticated => {
                     let mut l = self.execer.lock().await;
@@ -122,7 +114,7 @@ impl<T: RconImpl> ServerSession<T> {
                         debug!("authenticated user");
                         self.authenticated = true;
                         let _ = self
-                            .writer
+                            .stream
                             .send(Packet {
                                 id: s.id,
                                 ptype: PacketType::ResponseValue,
@@ -132,7 +124,7 @@ impl<T: RconImpl> ServerSession<T> {
                     } else {
                         debug!("failed to authenticate user");
                         let _ = self
-                            .writer
+                            .stream
                             .send(Packet {
                                 id: -1,
                                 ptype: PacketType::ResponseValue,
@@ -161,13 +153,23 @@ impl<T: RconImpl> ServerSession<T> {
 
 struct PacketCodec {
     state: DecodeState,
+    is_client: bool,
 }
 
 impl PacketCodec {
-    pub fn new() -> PacketCodec {
+    pub fn new(is_client: bool)-> PacketCodec {
         PacketCodec {
             state: DecodeState::Head,
+            is_client,
         }
+    }
+
+    pub fn new_client() -> PacketCodec {
+        Self::new(true)
+    }
+
+    pub fn new_server() -> PacketCodec {
+        Self::new(false)
     }
 }
 
@@ -201,7 +203,7 @@ impl Decoder for PacketCodec {
                 if src.len() <= len {
                     let data = src.split_to(len).freeze();
                     return Ok(Some(
-                        Packet::from_bytes(data, false).expect("failed to deserialize packet"),
+                        Packet::from_bytes(data, self.is_client).expect("failed to deserialize packet"),
                     ));
                 } else {
                     panic!("too lazy to impliment multi packet processing");
