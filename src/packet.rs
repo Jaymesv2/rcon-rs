@@ -79,32 +79,39 @@ impl Packet {
         &self.body.len() + 10
     }
 }
+// https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Packet_Size
+// the rcon spec says that packets cannot be more than 4096 bytes
 
 pub struct PacketCodec {
     state: DecodeState,
     is_client: bool,
+    max_length: usize,
 }
 
 impl PacketCodec {
-    pub fn new(is_client: bool)-> PacketCodec {
+    /// Creates a new PacketCodec,
+    /// WARNING: The [RCON spec](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Packet_Size) sets a maximum packet size of 4096 bytes, raising it higher may cause issues with some clients.
+    pub fn new(is_client: bool, max_length: usize) -> PacketCodec { 
         PacketCodec {
             state: DecodeState::Head,
             is_client,
+            max_length,
         }
     }
 
     pub fn new_client() -> PacketCodec {
-        Self::new(true)
+        Self::new(true, 4096)
     }
 
     pub fn new_server() -> PacketCodec {
-        Self::new(false)
+        Self::new(false, 4096)
     }
 }
 
 enum DecodeState {
     Head,
     Data(usize),
+    Ignore(usize),
 }
 
 impl Encoder<Packet> for PacketCodec {
@@ -122,25 +129,56 @@ impl Decoder for PacketCodec {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match self.state {
+        if src.len() == 0 {
+            return Ok(None)
+        }
+
+        let packet_len = match self.state {
             DecodeState::Head => {
-                let slen = src.len();
-                if slen <= 4 {
+                // ensures that src.get_i32_le() doesnt panic
+                if src.len() <= 4 {
                     return Ok(None);
                 };
-                let len = src.get_i32_le() as usize;
-                if src.len() <= len {
-                    let data = src.split_to(len).freeze();
-                    return Ok(Some(
-                        Packet::from_bytes(data, self.is_client).expect("failed to deserialize packet"),
-                    ));
-                } else {
-                    panic!("too lazy to impliment multi packet processing");
+                let packet_len = src.get_i32_le() as usize;
+                if src.len() > self.max_length {
+                    if src.len() >= packet_len {
+                        let _ = src.split_to(packet_len);
+                        return Ok(None)
+                    } else {
+                        let remaining = src.len();
+                        src.clear();
+                        self.state = DecodeState::Ignore(remaining);
+                        return Ok(None)
+                    }
+                    //return Err(Error::new(ErrorKind::InvalidData, "client sent a packet which was larger than the maximum allowed packet length"));
+                } else if src.len() < packet_len {
+                    self.state = DecodeState::Data(packet_len);
+                    return Ok(None)
+                } 
+                packet_len
+            }
+            DecodeState::Data(packet_len) => {
+                if packet_len < src.len() {
+                    return Ok(None)
                 }
-            }
-            DecodeState::Data(_s) => {
-                panic!("too lazy to impliment multi packet processing");
-            }
-        }
+                packet_len
+            },
+            DecodeState::Ignore(remaining) => {
+                if src.len() > 0 {
+                    if src.len() >= remaining {
+                        let _ = src.split_to(remaining);
+                        self.state = DecodeState::Head;
+                    } else {
+                        self.state = DecodeState::Ignore(remaining - src.len());
+                        src.clear();
+                    }
+                }
+                return Ok(None)
+            },
+        };
+
+        let data = src.split_to(packet_len).freeze();
+        Ok(Some(Packet::from_bytes(data, self.is_client)?))
+
     }
 }
