@@ -2,9 +2,9 @@
 pub mod packet;
 #[cfg(feature = "packet")]
 pub use packet::Packet;
-#[cfg(feature = "packet")]
+#[cfg(feature = "client")]
 pub mod client;
-#[cfg(feature = "packet")]
+#[cfg(feature = "client")]
 pub use client::Client;
 #[cfg(feature = "server")]
 pub mod server;
