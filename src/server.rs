@@ -32,7 +32,7 @@ pub struct RconServer<T: RconImpl> {
 }
 
 impl<T: RconImpl + std::marker::Send + 'static> RconServer<T> {
-    pub fn new() -> RconServer<T> {
+    pub fn new() -> Self {
         RconServer {
             state: Arc::new(RwLock::new(TypeMap::new())),
             sessions: HashMap::new(),
@@ -94,18 +94,18 @@ impl<T: RconImpl> ServerSession<T> {
         debug!("starting client loop");
         loop {
             let authenticated = self.authenticated;
-            let m = self.stream.next().await;
-            debug!("recieved packet {:?}", m);
-            match m {
+            let msg = self.stream.next().await;
+            debug!("recieved packet {:?}", msg);
+            match msg {
                 Some(Ok(s)) if s.ptype == PacketType::ExecCommand && authenticated => {
-                    let mut l = self.execer.lock().await;
-                    let r = T::process(&mut *l, s.body).await;
-                    let p = Packet {
+                    let mut lock = self.execer.lock().await;
+                    let ret = T::process(&mut *lock, s.body).await;
+                    let pk = Packet {
                         ptype: PacketType::ResponseValue,
                         id: s.id,
-                        body: r.unwrap(),
+                        body: ret.unwrap(),
                     };
-                    let _ = self.stream.send(p).await;
+                    let _ = self.stream.send(pk).await;
                 }
                 Some(Ok(s)) if s.ptype == PacketType::Auth && !authenticated => {
                     let mut l = self.execer.lock().await;

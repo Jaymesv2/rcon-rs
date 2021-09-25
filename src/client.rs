@@ -23,7 +23,7 @@ impl Client {
             authenticated: false,
         })
     }
-    
+
     // maybe check if the client is authenicated before allowing this
     pub async fn login(&mut self, password: String) -> io::Result<bool> {
         let aid = thread_rng().gen::<i32>();
@@ -59,7 +59,7 @@ impl Client {
     }
 
     pub async fn run_command(&mut self, cmd: String) -> io::Result<Packet> {
-        if self.authenticated == false {
+        if !self.authenticated {
             debug!("cannot run commands without authenicating");
             return Err(Error::new(ErrorKind::Other, "not logged in"));
         }

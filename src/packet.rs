@@ -39,19 +39,18 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn from_bytes(b: Bytes, is_client: bool) -> io::Result<Packet> {
-        let mut buf = b.clone();
-        if buf.remaining() < 10 || buf.remaining() > 4096 {
+    pub fn from_bytes(mut b: Bytes, is_client: bool) -> io::Result<Packet> {
+        if b.remaining() < 10 || b.remaining() > 4096 {
             return Err(Error::new(ErrorKind::InvalidInput, "Message length was less than the minimum (10 bytes)"))
         }
-        let msg_id = buf.get_i32_le();
-        let ptype = PacketType::from_i32(buf.get_i32_le(), !is_client).map_err(|_| {
+        let msg_id = b.get_i32_le();
+        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client).map_err(|_| {
             Error::new(ErrorKind::InvalidInput, "Undefined message id")
         })?;
 
         let mut body = String::new();
-        let rem = buf.remaining() - 2;
-        buf.take(rem).reader().read_to_string(&mut body).unwrap();
+        let rem = b.remaining() - 2;
+        b.take(rem).reader().read_to_string(&mut body).unwrap();
         Ok(Packet {
             ptype,
             id: msg_id,
@@ -65,7 +64,7 @@ impl Packet {
         buf.freeze()
     }
 
-    pub fn len(&self) -> usize {
+    pub fn encoded_len(&self) -> usize {
         &self.body.len() + 10
     }
 
@@ -81,7 +80,6 @@ impl Packet {
 }
 // https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Packet_Size
 // the rcon spec says that packets cannot be more than 4096 bytes
-
 pub struct PacketCodec {
     state: DecodeState,
     is_client: bool,
@@ -98,11 +96,12 @@ impl PacketCodec {
             max_length,
         }
     }
-
+    #[cfg(feature = "client")]
     pub fn new_client() -> PacketCodec {
         Self::new(true, 4096)
     }
 
+    #[cfg(feature = "server")]
     pub fn new_server() -> PacketCodec {
         Self::new(false, 4096)
     }
@@ -118,7 +117,7 @@ impl Encoder<Packet> for PacketCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: Packet, dst: &mut BytesMut) -> io::Result<()> {
-        dst.put_i32_le(item.len() as i32);
+        dst.put_i32_le(item.encoded_len() as i32);
         item.write_bytes(dst);
         Ok(())
     }
@@ -129,7 +128,7 @@ impl Decoder for PacketCodec {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        if src.len() == 0 {
+        if src.is_empty() {
             return Ok(None)
         }
 
@@ -164,7 +163,7 @@ impl Decoder for PacketCodec {
                 packet_len
             },
             DecodeState::Ignore(remaining) => {
-                if src.len() > 0 {
+                if !src.is_empty() {
                     if src.len() >= remaining {
                         let _ = src.split_to(remaining);
                         self.state = DecodeState::Head;
@@ -179,6 +178,5 @@ impl Decoder for PacketCodec {
 
         let data = src.split_to(packet_len).freeze();
         Ok(Some(Packet::from_bytes(data, self.is_client)?))
-
     }
 }

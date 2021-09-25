@@ -1,6 +1,12 @@
+#[cfg(feature = "packet")]
 pub mod packet;
+#[cfg(feature = "packet")]
 pub use packet::Packet;
+#[cfg(feature = "packet")]
 pub mod client;
+#[cfg(feature = "packet")]
 pub use client::Client;
+#[cfg(feature = "server")]
 pub mod server;
+#[cfg(feature = "server")]
 pub use server::*;
