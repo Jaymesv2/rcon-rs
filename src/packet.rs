@@ -1,6 +1,6 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::*;
-use std::io::{Read, self, Error, ErrorKind};
+use std::io::{self, Error, ErrorKind, Read};
 use tokio_util::codec::*;
 
 #[derive(PartialEq, Debug)]
@@ -41,12 +41,14 @@ pub struct Packet {
 impl Packet {
     pub fn from_bytes(mut b: Bytes, is_client: bool) -> io::Result<Packet> {
         if b.remaining() < 10 || b.remaining() > 4096 {
-            return Err(Error::new(ErrorKind::InvalidInput, "Message length was less than the minimum (10 bytes)"))
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Message length was less than the minimum (10 bytes)",
+            ));
         }
         let msg_id = b.get_i32_le();
-        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client).map_err(|_| {
-            Error::new(ErrorKind::InvalidInput, "Undefined message id")
-        })?;
+        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client)
+            .map_err(|_| Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
 
         let mut body = String::new();
         let rem = b.remaining() - 2;
@@ -89,7 +91,7 @@ pub struct PacketCodec {
 impl PacketCodec {
     /// Creates a new PacketCodec,
     /// WARNING: The [RCON spec](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Packet_Size) sets a maximum packet size of 4096 bytes, raising it higher may cause issues with some clients.
-    pub fn new(is_client: bool, max_length: usize) -> PacketCodec { 
+    pub fn new(is_client: bool, max_length: usize) -> PacketCodec {
         PacketCodec {
             state: DecodeState::Head,
             is_client,
@@ -129,7 +131,7 @@ impl Decoder for PacketCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
         if src.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         let packet_len = match self.state {
@@ -142,26 +144,26 @@ impl Decoder for PacketCodec {
                 if src.len() > self.max_length {
                     if src.len() >= packet_len {
                         let _ = src.split_to(packet_len);
-                        return Ok(None)
+                        return Ok(None);
                     } else {
                         let remaining = src.len();
                         src.clear();
                         self.state = DecodeState::Ignore(remaining);
-                        return Ok(None)
+                        return Ok(None);
                     }
                     //return Err(Error::new(ErrorKind::InvalidData, "client sent a packet which was larger than the maximum allowed packet length"));
                 } else if src.len() < packet_len {
                     self.state = DecodeState::Data(packet_len);
-                    return Ok(None)
-                } 
+                    return Ok(None);
+                }
                 packet_len
             }
             DecodeState::Data(packet_len) => {
                 if packet_len < src.len() {
-                    return Ok(None)
+                    return Ok(None);
                 }
                 packet_len
-            },
+            }
             DecodeState::Ignore(remaining) => {
                 if !src.is_empty() {
                     if src.len() >= remaining {
@@ -172,8 +174,8 @@ impl Decoder for PacketCodec {
                         src.clear();
                     }
                 }
-                return Ok(None)
-            },
+                return Ok(None);
+            }
         };
 
         let data = src.split_to(packet_len).freeze();

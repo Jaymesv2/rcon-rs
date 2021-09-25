@@ -1,9 +1,9 @@
-use tokio::net::{TcpStream, ToSocketAddrs};
-use tokio_util::codec::*;
+use futures::{SinkExt, StreamExt};
 use log::*;
 use rand::{thread_rng, Rng};
 use std::io::{self, Error, ErrorKind};
-use futures::{SinkExt, StreamExt};
+use tokio::net::{TcpStream, ToSocketAddrs};
+use tokio_util::codec::*;
 
 use super::packet::*;
 
@@ -52,8 +52,8 @@ impl Client {
                 } // fix this
                 None => {
                     debug!("stream ended while waiting for auth response");
-                    return Err(io::Error::new(io::ErrorKind::ConnectionAborted, ""))
-                },
+                    return Err(io::Error::new(io::ErrorKind::ConnectionAborted, ""));
+                }
             }
         }
     }
@@ -71,13 +71,15 @@ impl Client {
             body: cmd,
         };
 
-        self.write_packet(pk)
-            .await?;
+        self.write_packet(pk).await?;
 
         match self.stream.next().await {
             Some(Ok(x)) => Ok(x),
             Some(Err(e)) => Err(e),
-            None => Err(Error::new(ErrorKind::ConnectionAborted, "Server ended the connection")),
+            None => Err(Error::new(
+                ErrorKind::ConnectionAborted,
+                "Server ended the connection",
+            )),
         }
     }
 
