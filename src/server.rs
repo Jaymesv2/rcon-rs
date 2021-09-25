@@ -2,7 +2,8 @@ use tokio_util::codec::*;
 use log::*;
 use std::{collections::HashMap, io, sync::Arc};
 use futures::{FutureExt, SinkExt, StreamExt};
-use typemap::TypeMap;
+pub use typemap::TypeMap;
+use async_trait::async_trait;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{Mutex, RwLock},
@@ -10,14 +11,6 @@ use tokio::{
 
 use super::*;
 use packet::*;
-
-/*
-TODO:
-  new abstraction for handling command filtering
-  client authentication checking
-*/
-
-use async_trait::async_trait;
 
 #[async_trait]
 pub trait RconImpl {
