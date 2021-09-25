@@ -1,4 +1,4 @@
-use tokio::net::{tcp, TcpStream, ToSocketAddrs};
+use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio_util::codec::*;
 use log::*;
 use rand::{thread_rng, Rng};
@@ -23,7 +23,8 @@ impl Client {
             authenticated: false,
         })
     }
-
+    
+    // maybe check if the client is authenicated before allowing this
     pub async fn login(&mut self, password: String) -> io::Result<bool> {
         let aid = thread_rng().gen::<i32>();
         let pk = Packet {
@@ -37,6 +38,7 @@ impl Client {
         loop {
             match self.stream.next().await {
                 Some(Ok(p)) if p.ptype == PacketType::AuthResponse => {
+                    debug!("client successfully logged in");
                     self.authenticated = true;
                     return Ok(p.id == aid);
                 }
@@ -48,12 +50,21 @@ impl Client {
                     debug!("read error from buffer: {:?}", e);
                     continue;
                 } // fix this
-                None => return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "")),
+                None => {
+                    debug!("stream ended while waiting for auth response");
+                    return Err(io::Error::new(io::ErrorKind::ConnectionAborted, ""))
+                },
             }
         }
     }
 
     pub async fn run_command(&mut self, cmd: String) -> io::Result<Packet> {
+        if self.authenticated == false {
+            debug!("cannot run commands without authenicating");
+            return Err(Error::new(ErrorKind::Other, "not logged in"));
+        }
+
+        debug!("running command: \"{}\"", &cmd);
         let pk = Packet {
             ptype: PacketType::ExecCommand,
             id: thread_rng().gen::<i32>(),
@@ -68,6 +79,10 @@ impl Client {
             Some(Err(e)) => Err(e),
             None => Err(Error::new(ErrorKind::ConnectionAborted, "Server ended the connection")),
         }
+    }
+
+    pub fn overide_authentication(&mut self, auth: bool) {
+        self.authenticated = auth;
     }
 
     pub async fn run(&mut self, cmd: String) -> io::Result<String> {
