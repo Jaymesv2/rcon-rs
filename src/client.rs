@@ -2,7 +2,7 @@ use tokio::net::{tcp, TcpStream, ToSocketAddrs};
 use tokio_util::codec::*;
 use log::*;
 use rand::{thread_rng, Rng};
-use std::io;
+use std::io::{self, Error, ErrorKind};
 use futures::{SinkExt, StreamExt};
 
 use super::packet::*;
@@ -53,7 +53,7 @@ impl Client {
         }
     }
 
-    pub async fn run_command(&mut self, cmd: String) -> Result<Packet, PacketProcessError> {
+    pub async fn run_command(&mut self, cmd: String) -> io::Result<Packet> {
         let pk = Packet {
             ptype: PacketType::ExecCommand,
             id: thread_rng().gen::<i32>(),
@@ -61,17 +61,16 @@ impl Client {
         };
 
         self.write_packet(pk)
-            .await
-            .map_err(|e| PacketProcessError::Io(e))?;
+            .await?;
 
         match self.stream.next().await {
             Some(Ok(x)) => Ok(x),
-            Some(Err(e)) => Err(PacketProcessError::Io(e)),
-            None => Err(PacketProcessError::StreamEnded),
+            Some(Err(e)) => Err(e),
+            None => Err(Error::new(ErrorKind::ConnectionAborted, "Server ended the connection")),
         }
     }
 
-    pub async fn run(&mut self, cmd: String) -> Result<String, PacketProcessError> {
+    pub async fn run(&mut self, cmd: String) -> io::Result<String> {
         Ok(self.run_command(cmd).await?.body)
     }
 

@@ -1,6 +1,6 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::*;
-use std::io::{Read, self};
+use std::io::{Read, self, Error, ErrorKind};
 use tokio_util::codec::*;
 
 #[derive(PartialEq, Debug)]
@@ -39,18 +39,17 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn from_bytes(b: Bytes, is_client: bool) -> Result<Packet, PacketProcessError> {
+    pub fn from_bytes(b: Bytes, is_client: bool) -> io::Result<Packet> {
         let mut buf = b.clone();
         if buf.remaining() < 10 || buf.remaining() > 4096 {
-            return Err(PacketProcessError::Length);
+            return Err(Error::new(ErrorKind::InvalidInput, "Message length was less than the minimum (10 bytes)"))
         }
         let msg_id = buf.get_i32_le();
-        let ptype = PacketType::from_i32(buf.get_i32_le(), !is_client).map_err(|e| {
-            error!("received bad packet from client {:?}", e);
-            PacketProcessError::ParseError
+        let ptype = PacketType::from_i32(buf.get_i32_le(), !is_client).map_err(|_| {
+            Error::new(ErrorKind::InvalidInput, "Undefined message id")
         })?;
 
-        let mut body = String::new(); //String::from_utf8(buf.take(buf.remaining() - 10)).unwrap();
+        let mut body = String::new();
         let rem = buf.remaining() - 2;
         buf.take(rem).reader().read_to_string(&mut body).unwrap();
         Ok(Packet {
@@ -80,15 +79,6 @@ impl Packet {
         &self.body.len() + 10
     }
 }
-
-#[derive(Debug)]
-pub enum PacketProcessError {
-    Io(std::io::Error),
-    Length,
-    ParseError,
-    StreamEnded,
-}
-
 
 pub struct PacketCodec {
     state: DecodeState,
