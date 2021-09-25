@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::*;
-use std::io::Read;
+use std::io::{Read, self};
+use tokio_util::codec::*;
 
 #[derive(PartialEq, Debug)]
 pub enum PacketType {
@@ -86,4 +87,70 @@ pub enum PacketProcessError {
     Length,
     ParseError,
     StreamEnded,
+}
+
+
+pub struct PacketCodec {
+    state: DecodeState,
+    is_client: bool,
+}
+
+impl PacketCodec {
+    pub fn new(is_client: bool)-> PacketCodec {
+        PacketCodec {
+            state: DecodeState::Head,
+            is_client,
+        }
+    }
+
+    pub fn new_client() -> PacketCodec {
+        Self::new(true)
+    }
+
+    pub fn new_server() -> PacketCodec {
+        Self::new(false)
+    }
+}
+
+enum DecodeState {
+    Head,
+    Data(usize),
+}
+
+impl Encoder<Packet> for PacketCodec {
+    type Error = io::Error;
+
+    fn encode(&mut self, item: Packet, dst: &mut BytesMut) -> io::Result<()> {
+        dst.put_i32_le(item.len() as i32);
+        item.write_bytes(dst);
+        Ok(())
+    }
+}
+
+impl Decoder for PacketCodec {
+    type Item = Packet;
+    type Error = io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
+        match self.state {
+            DecodeState::Head => {
+                let slen = src.len();
+                if slen <= 4 {
+                    return Ok(None);
+                };
+                let len = src.get_i32_le() as usize;
+                if src.len() <= len {
+                    let data = src.split_to(len).freeze();
+                    return Ok(Some(
+                        Packet::from_bytes(data, self.is_client).expect("failed to deserialize packet"),
+                    ));
+                } else {
+                    panic!("too lazy to impliment multi packet processing");
+                }
+            }
+            DecodeState::Data(_s) => {
+                panic!("too lazy to impliment multi packet processing");
+            }
+        }
+    }
 }
