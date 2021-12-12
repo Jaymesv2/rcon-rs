@@ -1,5 +1,4 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use log::*;
 use std::io::{self, Error, ErrorKind, Read};
 use tokio_util::codec::*;
 
@@ -12,13 +11,13 @@ pub enum PacketType {
 }
 
 impl PacketType {
-    pub fn from_i32(i: i32, response: bool) -> Result<PacketType, ()> {
+    pub fn from_i32(i: i32, response: bool) -> Option<PacketType> {
         match i {
-            0 => Ok(PacketType::ResponseValue),
-            2 if !response => Ok(PacketType::AuthResponse),
-            2 => Ok(PacketType::ExecCommand),
-            3 => Ok(PacketType::Auth),
-            _ => Err(()),
+            0 => Some(PacketType::ResponseValue),
+            2 if !response => Some(PacketType::AuthResponse),
+            2 => Some(PacketType::ExecCommand),
+            3 => Some(PacketType::Auth),
+            _ => None,
         }
     }
     pub fn bytes(&self) -> i32 {
@@ -47,8 +46,7 @@ impl Packet {
             ));
         }
         let msg_id = b.get_i32_le();
-        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client)
-            .map_err(|_| Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
+        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client).ok_or( Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
 
         let mut body = String::new();
         let rem = b.remaining() - 2;
@@ -74,9 +72,8 @@ impl Packet {
     pub fn write_bytes(&self, buf: &mut BytesMut) -> usize {
         buf.put_i32_le(self.id);
         buf.put_i32_le(self.ptype.bytes());
-        buf.put_slice(&self.body.clone().as_bytes());
+        buf.put_slice(self.body.clone().as_bytes());
         buf.put_slice(&[0x00, 0x00]);
-        dbg!(buf);
         &self.body.len() + 10
     }
 }

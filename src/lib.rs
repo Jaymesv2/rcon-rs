@@ -5,7 +5,7 @@ pub use packet::Packet;
 #[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "client")]
-pub use client::Client;
+pub use client::Connection;
 #[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "server")]
