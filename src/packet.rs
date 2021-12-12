@@ -46,7 +46,7 @@ impl Packet {
             ));
         }
         let msg_id = b.get_i32_le();
-        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client).ok_or( Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
+        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client).ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
 
         let mut body = String::new();
         let rem = b.remaining() - 2;

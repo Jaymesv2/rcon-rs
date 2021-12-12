@@ -93,7 +93,7 @@ impl Connection {
             
             return Ok(())
         }
-        return Err(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"));   
+        Err(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))
     }
 
     // maybe check if the client is authenicated before allowing this
@@ -107,7 +107,7 @@ impl Connection {
             body: self.password.clone(),
         };
 
-        let stream = self.stream.as_mut().ok_or(io::Error::new(io::ErrorKind::NotConnected, "Not connected"))?;
+        let stream = self.stream.as_mut().ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "Not connected"))?;
 
         stream.send(pk).await?;
 
@@ -137,7 +137,7 @@ impl Connection {
                 }
             }
         };
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Recieved Invalid data from server"))
+        Err(io::Error::new(io::ErrorKind::InvalidData, "Recieved Invalid data from server"))
     }
 
     pub async fn run(&mut self, cmd: String) -> io::Result<Packet> {
