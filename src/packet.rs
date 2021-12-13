@@ -38,7 +38,7 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn from_bytes(mut b: Bytes, is_client: bool) -> io::Result<Packet> {
+    pub fn from_bytes(mut b: Bytes, codec: CodecType) -> io::Result<Packet> {
         if b.remaining() < 10 || b.remaining() > 4096 {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -46,7 +46,7 @@ impl Packet {
             ));
         }
         let msg_id = b.get_i32_le();
-        let ptype = PacketType::from_i32(b.get_i32_le(), !is_client).ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
+        let ptype = PacketType::from_i32(b.get_i32_le(), codec == CodecType::Server).ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
 
         let mut body = String::new();
         let rem = b.remaining() - 2;
@@ -58,17 +58,10 @@ impl Packet {
         })
     }
 
-    pub fn bytes(&self) -> Bytes {
-        let mut buf = BytesMut::new();
-        self.write_bytes(&mut buf);
-        buf.freeze()
-    }
-
     pub fn encoded_len(&self) -> usize {
         &self.body.len() + 10
     }
 
-    /// Writes the packets
     pub fn write_bytes(&self, buf: &mut BytesMut) -> usize {
         buf.put_i32_le(self.id);
         buf.put_i32_le(self.ptype.bytes());
@@ -81,29 +74,34 @@ impl Packet {
 // the rcon spec says that packets cannot be more than 4096 bytes
 pub struct PacketCodec {
     state: DecodeState,
-    is_client: bool,
+    ctype: CodecType,
     max_length: usize,
 }
 
 impl PacketCodec {
     /// Creates a new PacketCodec,
     /// WARNING: The [RCON spec](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Packet_Size) sets a maximum packet size of 4096 bytes, raising it higher may cause issues with some clients.
-    pub fn new(is_client: bool, max_length: usize) -> PacketCodec {
+    pub fn new(codec_type: CodecType, max_length: usize) -> PacketCodec {
         PacketCodec {
             state: DecodeState::Head,
-            is_client,
+            ctype: codec_type,
             max_length,
         }
     }
     #[cfg(feature = "client")]
     pub fn new_client() -> PacketCodec {
-        Self::new(true, 4096)
+        Self::new(CodecType::Client, 4096)
     }
 
     #[cfg(feature = "server")]
     pub fn new_server() -> PacketCodec {
-        Self::new(false, 4096)
+        Self::new(CodecType::Server, 4096)
     }
+}
+#[derive(PartialEq, Clone, Copy)]
+pub enum CodecType {
+    Client,
+    Server
 }
 
 enum DecodeState {
@@ -176,6 +174,6 @@ impl Decoder for PacketCodec {
         };
 
         let data = src.split_to(packet_len).freeze();
-        Ok(Some(Packet::from_bytes(data, self.is_client)?))
+        Ok(Some(Packet::from_bytes(data, self.ctype)?))
     }
 }

@@ -82,7 +82,7 @@ impl Connection {
     }
     
     /// Sends a command to the connected server. 
-    pub async fn run(&mut self, cmd: String) -> io::Result<Packet> {
+    pub async fn run(&mut self, cmd: String) -> io::Result<String> {
         debug!("running command: \"{}\"", &cmd);
         let pk = Packet {
             ptype: PacketType::ExecCommand,
@@ -100,14 +100,15 @@ impl Connection {
 
         stream.send(pk).await?;
 
-        match stream.next().await {
+        let p = match stream.next().await {
             Some(Ok(x)) => Ok(x),
             Some(Err(e)) => Err(e),
             None => Err(Error::new(
                 ErrorKind::ConnectionAborted,
                 "Server ended the connection",
             )),
-        }
+        }?;
+        Ok(p.body)
     }
 }
 
