@@ -87,12 +87,12 @@ impl Connection {
     }
     
     /// Sends a command to the connected server. 
-    pub async fn cmd(&mut self, cmd: String) -> Result<String> {
-        debug!("running command: \"{}\"", &cmd);
+    pub async fn cmd<C: ToString>(&mut self, cmd: C) -> Result<String> {
+        debug!("running command: \"{}\"", &cmd.to_string());
         let pk = Packet {
             ptype: PacketType::ExecCommand,
             id: thread_rng().gen::<i32>(),
-            body: cmd,
+            body: cmd.to_string(),
         };
         let stream = if let Some(s) = self.stream.as_mut() {
             s
@@ -222,7 +222,7 @@ impl Display for Error {
             Error::InvalidResponse => {
                 write!(f, "Invalid Response")
             }
-        }   
+        }
     }
 }
 
