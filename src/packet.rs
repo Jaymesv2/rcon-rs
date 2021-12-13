@@ -1,10 +1,11 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::{self, Error as IoError, Read};
 use tokio_util::codec::*;
+use log::*;
 
 type Result<T> = std::result::Result<T, PacketError>;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum PacketType {
     Auth,
     AuthResponse,
@@ -13,10 +14,10 @@ pub enum PacketType {
 }
 
 impl PacketType {
-    pub fn from_i32(i: i32, response: bool) -> Option<PacketType> {
+    pub fn from_i32(i: i32, codec: CodecType) -> Option<PacketType> {
         match i {
             0 => Some(PacketType::ResponseValue),
-            2 if !response => Some(PacketType::AuthResponse),
+            2 if codec == CodecType::Client => Some(PacketType::AuthResponse),
             2 => Some(PacketType::ExecCommand),
             3 => Some(PacketType::Auth),
             _ => None,
@@ -70,9 +71,7 @@ impl Display for PacketError {
 
 impl Error for PacketError {}
 
-
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Packet {
     pub ptype: PacketType,
     pub id: i32,
@@ -80,16 +79,17 @@ pub struct Packet {
 }
 
 impl Packet {
+    /// does not include the size part of the packet, that is removed by the codec
     pub fn from_bytes(mut b: Bytes, codec: CodecType) -> Result<Packet> {
-        if (10..=4096).contains(&b.remaining()) {
+        if !(10..=4096).contains(&b.remaining()) {
             return Err(PacketError::InvalidLength);
         }
         let msg_id = b.get_i32_le();
-        let ptype = PacketType::from_i32(b.get_i32_le(), codec == CodecType::Server).ok_or(PacketError::UndefinedType)?;
+        let ptype = PacketType::from_i32(b.get_i32_le(), codec).ok_or(PacketError::UndefinedType)?;
 
         let mut body = String::new();
         let rem = b.remaining() - 2;
-        b.take(rem).reader().read_to_string(&mut body).unwrap();
+        b.take(rem).reader().read_to_string(&mut body).expect("failed to read bytes");
         Ok(Packet {
             ptype,
             id: msg_id,
@@ -111,6 +111,7 @@ impl Packet {
 }
 // https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Packet_Size
 // the rcon spec says that packets cannot be more than 4096 bytes
+
 pub struct PacketCodec {
     state: DecodeState,
     ctype: CodecType,
@@ -161,6 +162,7 @@ impl Encoder<Packet> for PacketCodec {
         Ok(())
     }
 }
+
 
 impl Decoder for PacketCodec {
     type Item = Packet;
@@ -214,8 +216,71 @@ impl Decoder for PacketCodec {
                 return Ok(None);
             }
         };
-
         let data = src.split_to(packet_len).freeze();
         Ok(Some(Packet::from_bytes(data, self.ctype)?))
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    //use bytes::*;
+    // the packet type does not 
+    static AUTH_PACKET: [u8; 18] = [10, 0, 0, 0, 3, 0, 0, 0, 112, 97, 115, 115, 119, 111, 114, 100, 0, 0];
+    static EMPTY_AUTH_PACKET: [u8; 10] = [10, 0, 0, 0, 3, 0, 0, 0, 0, 0];
+
+    #[tokio::test]
+    async fn empty_auth_packet_encode() {
+        let packet = Packet {
+            ptype: PacketType::Auth,
+            id: 10,
+            body: String::new(),
+        };
+
+        let mut packet_bytes = BytesMut::new();
+        let mut test_bytes = BytesMut::new();
+        packet.write_bytes(&mut packet_bytes);
+        test_bytes.put_slice(&EMPTY_AUTH_PACKET);
+        assert_eq!(packet_bytes.freeze(), test_bytes.freeze());
+    }
+
+    #[tokio::test]
+    async fn auth_packet_encode() {
+        let packet = Packet {
+            ptype: PacketType::Auth,
+            id: 10,
+            body: String::from("password"),
+        };
+
+        let mut packet_bytes = BytesMut::new();
+        let mut test_bytes = BytesMut::new();
+        packet.write_bytes(&mut packet_bytes);
+        test_bytes.put_slice(&AUTH_PACKET);
+        assert_eq!(packet_bytes.freeze(), test_bytes.freeze());
+    }
+
+    #[tokio::test]
+    async fn auth_packet_decode_client() -> Result<()> {
+        let packet = Packet {
+            ptype: PacketType::Auth,
+            id: 10,
+            body: String::from("password"),
+        };
+        
+        let mut packet_bytes = BytesMut::new();
+        packet_bytes.put_slice(&AUTH_PACKET);
+        
+        let p = Packet::from_bytes(packet_bytes.freeze(), CodecType::Client)?;
+        if p != packet {
+            return Err(PacketError::InvalidLength)
+        }   
+        Ok(())
+    }
+
+
+    #[tokio::test]
+    async fn exec_packet_decode() {
+
     }
 }

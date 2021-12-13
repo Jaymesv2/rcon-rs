@@ -41,6 +41,8 @@ impl Builder {
             Some(s) => s,
             None => return Err(Error::Io(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))),
         };
+        
+        trace!("connecting to {}", &addr);
 
         let mut c = Connection {
             stream: None,
@@ -121,20 +123,21 @@ impl Connection {
 impl Connection {
     async fn connect(&mut self) -> io::Result<()> {
         for retries in 1..self.max_retries+1 {
+            trace!("Attempting to connect to {} #{}", &self.host, retries);
             let s = match TcpStream::connect(self.host).await {
                 Ok(s) => s,
                 Err(e) => {
                     trace!("failed to connect to server: {}", e);
+                    sleep(if self.exponential_backoff {
+                        Duration::from_millis((self.retry_delay.as_millis() as u64).pow(retries ) )
+                    } else {
+                        self.retry_delay
+                    }).await;
                     continue;
                 }
             };
 
             self.stream = Some(Framed::new(s, PacketCodec::new_client()));
-            sleep(if self.exponential_backoff {
-                Duration::from_millis((self.retry_delay.as_millis() as u64).pow(retries ) )
-            } else {
-                self.retry_delay
-            }).await;
             
             return Ok(())
         }
