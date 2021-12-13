@@ -2,9 +2,9 @@
 
 pub(crate) mod packet;
 /// A [RCON](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol) connection for interacting with remote servers.
-/// ```
+/// ```no_run
 /// #[tokio::main]
-/// async fn main() -> std::io::Result<()> {
+/// async fn main() -> Result<(), rcon_rs::client::Error> {
 ///     let mut c = rcon_rs::client::Connection::builder()
 ///         .max_retries(3)
 ///         .retry_delay(std::time::Duration::from_millis(1000))
