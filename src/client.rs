@@ -1,18 +1,21 @@
+use super::packet::{Packet, PacketCodec, PacketError, PacketType};
 use futures::{SinkExt, StreamExt};
 use log::*;
 use rand::{thread_rng, Rng};
-use tokio::{net::{TcpStream, ToSocketAddrs, lookup_host}, time::sleep};
-use tokio_util::codec::*;
-use super::packet::{Packet, PacketCodec, PacketType, PacketError};
 use std::{
-    net::SocketAddr,
-    io::{self, ErrorKind},
-    io::{Error as IoError},
     error::Error as ErrorTrait,
-    time::Duration,
+    fmt::{self, Display, Formatter},
+    io::Error as IoError,
+    io::{self, ErrorKind},
+    net::SocketAddr,
     result,
-    fmt::{Display, Formatter, self},
+    time::Duration,
 };
+use tokio::{
+    net::{lookup_host, TcpStream, ToSocketAddrs},
+    time::sleep,
+};
+use tokio_util::codec::*;
 
 /// A [RCON](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol) Connection.
 /// Automatic retries to connect to the server before returning an error.
@@ -36,12 +39,21 @@ pub struct Builder {
 impl Builder {
     /// Completes the builder and connects to the rcon server using the specified options by the builder.
     /// Eargerly connects to the server.
-    pub async fn connect<S: ToSocketAddrs, P: ToString>(self, addr: S, password: P) -> Result<Connection> {
+    pub async fn connect<S: ToSocketAddrs, P: ToString>(
+        self,
+        addr: S,
+        password: P,
+    ) -> Result<Connection> {
         let addr = match lookup_host(addr).await?.next() {
             Some(s) => s,
-            None => return Err(Error::Io(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))),
+            None => {
+                return Err(Error::Io(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "unable to resolve host",
+                )))
+            }
         };
-        
+
         trace!("connecting to {}", &addr);
 
         let mut c = Connection {
@@ -87,8 +99,8 @@ impl Connection {
             exponential_backoff: false,
         }
     }
-    
-    /// Sends a command to the connected server. 
+
+    /// Sends a command to the connected server.
     pub async fn cmd<C: ToString>(&mut self, cmd: C) -> Result<String> {
         debug!("running command: \"{}\"", &cmd.to_string());
         let pk = Packet {
@@ -122,26 +134,30 @@ impl Connection {
 // private methods
 impl Connection {
     async fn connect(&mut self) -> io::Result<()> {
-        for retries in 1..self.max_retries+1 {
+        for retries in 1..self.max_retries + 1 {
             trace!("Attempting to connect to {} #{}", &self.host, retries);
             let s = match TcpStream::connect(self.host).await {
                 Ok(s) => s,
                 Err(e) => {
                     trace!("failed to connect to server: {}", e);
                     sleep(if self.exponential_backoff {
-                        Duration::from_millis((self.retry_delay.as_millis() as u64).pow(retries ) )
+                        Duration::from_millis((self.retry_delay.as_millis() as u64).pow(retries))
                     } else {
                         self.retry_delay
-                    }).await;
+                    })
+                    .await;
                     continue;
                 }
             };
 
             self.stream = Some(Framed::new(s, PacketCodec::new_client()));
-            
-            return Ok(())
+
+            return Ok(());
         }
-        Err(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "unable to resolve host",
+        ))
     }
 
     async fn login(&mut self) -> Result<()> {
@@ -154,7 +170,10 @@ impl Connection {
             body: self.password.clone(),
         };
 
-        let stream = self.stream.as_mut().ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "Not connected"))?;
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "Not connected"))?;
 
         stream.send(pk).await?;
 
@@ -167,7 +186,10 @@ impl Connection {
                         Ok(())
                     } else {
                         trace!("authentication failed");
-                        Err(Error::Io(IoError::new(io::ErrorKind::Other, "Incorrect password")))
+                        Err(Error::Io(IoError::new(
+                            io::ErrorKind::Other,
+                            "Incorrect password",
+                        )))
                     };
                 }
                 Some(Ok(_)) => {
@@ -180,20 +202,27 @@ impl Connection {
                 } // fix this
                 None => {
                     trace!("stream ended while waiting for auth response");
-                    return Err(Error::Io(io::Error::new(io::ErrorKind::ConnectionAborted, "Connection to the server ")));
+                    return Err(Error::Io(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "Connection to the server ",
+                    )));
                 }
             }
-        };
+        }
         Err(Error::InvalidResponse)
     }
 }
 
 type Result<T> = result::Result<T, Error>;
 
+/// Error type
 #[derive(Debug)]
 pub enum Error {
+    /// For io Errors
     Io(io::Error),
+    /// Packet Error
     PacketError,
+    /// Invalide Response
     InvalidResponse,
 }
 
@@ -214,14 +243,14 @@ impl From<PacketError> for Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error>  {
+    fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error> {
         match self {
             Error::Io(e) => {
                 write!(f, "Io Error: {}", e)
-            },
+            }
             Error::PacketError => {
                 write!(f, "Packet Error")
-            },
+            }
             Error::InvalidResponse => {
                 write!(f, "Invalid Response")
             }

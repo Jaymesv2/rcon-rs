@@ -1,13 +1,13 @@
-use tokio_util::codec::*;
+use async_trait::async_trait;
+use futures::{FutureExt, SinkExt, StreamExt};
 use log::*;
 use std::{collections::HashMap, io, sync::Arc};
-use futures::{FutureExt, SinkExt, StreamExt};
-pub use typemap::TypeMap;
-use async_trait::async_trait;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{Mutex, RwLock},
 };
+use tokio_util::codec::*;
+pub use typemap::TypeMap;
 
 use super::*;
 use packet::*;

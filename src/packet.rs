@@ -1,7 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+//use log::*;
 use std::io::{self, Error as IoError, Read};
 use tokio_util::codec::*;
-use log::*;
 
 type Result<T> = std::result::Result<T, PacketError>;
 
@@ -18,7 +18,7 @@ impl PacketType {
         match i {
             0 => Some(PacketType::ResponseValue),
             2 if codec == CodecType::Client => Some(PacketType::AuthResponse),
-            2 => Some(PacketType::ExecCommand),
+            2 if codec == CodecType::Server => Some(PacketType::ExecCommand),
             3 => Some(PacketType::Auth),
             _ => None,
         }
@@ -37,7 +37,7 @@ impl PacketType {
 
 use std::{
     error::Error,
-    fmt::{Display, Formatter, self},
+    fmt::{self, Display, Formatter},
 };
 
 #[derive(Debug)]
@@ -54,14 +54,14 @@ impl From<IoError> for PacketError {
 }
 
 impl Display for PacketError {
-    fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), fmt::Error>  {
+    fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), fmt::Error> {
         match self {
             PacketError::Io(e) => {
                 write!(f, "Io Error: {}", e)
-            },
+            }
             PacketError::InvalidLength => {
                 write!(f, "Invalid Packet Length")
-            },
+            }
             PacketError::UndefinedType => {
                 write!(f, "Undefined Packet Type ")
             }
@@ -85,11 +85,15 @@ impl Packet {
             return Err(PacketError::InvalidLength);
         }
         let msg_id = b.get_i32_le();
-        let ptype = PacketType::from_i32(b.get_i32_le(), codec).ok_or(PacketError::UndefinedType)?;
+        let ptype =
+            PacketType::from_i32(b.get_i32_le(), codec).ok_or(PacketError::UndefinedType)?;
 
         let mut body = String::new();
         let rem = b.remaining() - 2;
-        b.take(rem).reader().read_to_string(&mut body).expect("failed to read bytes");
+        b.take(rem)
+            .reader()
+            .read_to_string(&mut body)
+            .expect("failed to read bytes");
         Ok(Packet {
             ptype,
             id: msg_id,
@@ -128,7 +132,7 @@ impl PacketCodec {
             max_length,
         }
     }
-    
+
     #[cfg(feature = "client")]
     pub fn new_client() -> PacketCodec {
         Self::new(CodecType::Client, 4096)
@@ -142,7 +146,7 @@ impl PacketCodec {
 #[derive(PartialEq, Clone, Copy)]
 pub enum CodecType {
     Client,
-    Server
+    Server,
 }
 
 enum DecodeState {
@@ -162,7 +166,6 @@ impl Encoder<Packet> for PacketCodec {
         Ok(())
     }
 }
-
 
 impl Decoder for PacketCodec {
     type Item = Packet;
@@ -221,13 +224,14 @@ impl Decoder for PacketCodec {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     //use bytes::*;
-    // the packet type does not 
-    static AUTH_PACKET: [u8; 18] = [10, 0, 0, 0, 3, 0, 0, 0, 112, 97, 115, 115, 119, 111, 114, 100, 0, 0];
+    // the packet type does not
+    static AUTH_PACKET: [u8; 18] = [
+        10, 0, 0, 0, 3, 0, 0, 0, 112, 97, 115, 115, 119, 111, 114, 100, 0, 0,
+    ];
     static EMPTY_AUTH_PACKET: [u8; 10] = [10, 0, 0, 0, 3, 0, 0, 0, 0, 0];
 
     #[tokio::test]
@@ -267,20 +271,17 @@ mod tests {
             id: 10,
             body: String::from("password"),
         };
-        
+
         let mut packet_bytes = BytesMut::new();
         packet_bytes.put_slice(&AUTH_PACKET);
-        
+
         let p = Packet::from_bytes(packet_bytes.freeze(), CodecType::Client)?;
         if p != packet {
-            return Err(PacketError::InvalidLength)
-        }   
+            return Err(PacketError::InvalidLength);
+        }
         Ok(())
     }
 
-
     #[tokio::test]
-    async fn exec_packet_decode() {
-
-    }
+    async fn exec_packet_decode() {}
 }
