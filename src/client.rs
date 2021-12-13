@@ -8,7 +8,7 @@ use std::{
     net::SocketAddr,
     io::{self, ErrorKind},
     io::{Error as IoError},
-    error::Error,
+    error::Error as ErrorTrait,
     time::Duration,
     result,
     fmt::{Display, Formatter, self},
@@ -39,7 +39,7 @@ impl Builder {
     pub async fn connect<S: ToSocketAddrs, P: ToString>(self, addr: S, password: P) -> Result<Connection> {
         let addr = match lookup_host(addr).await?.next() {
             Some(s) => s,
-            None => return Err(RconError::Io(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))),
+            None => return Err(Error::Io(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))),
         };
 
         let mut c = Connection {
@@ -107,8 +107,8 @@ impl Connection {
 
         let p = match stream.next().await {
             Some(Ok(x)) => Ok(x),
-            Some(Err(e)) => Err(RconError::from(e)),
-            None => Err(RconError::Io(IoError::new(
+            Some(Err(e)) => Err(Error::from(e)),
+            None => Err(Error::Io(IoError::new(
                 ErrorKind::ConnectionAborted,
                 "Server ended the connection",
             ))),
@@ -164,7 +164,7 @@ impl Connection {
                         Ok(())
                     } else {
                         trace!("authentication failed");
-                        Err(RconError::Io(IoError::new(io::ErrorKind::Other, "Incorrect password")))
+                        Err(Error::Io(IoError::new(io::ErrorKind::Other, "Incorrect password")))
                     };
                 }
                 Some(Ok(_)) => {
@@ -177,58 +177,53 @@ impl Connection {
                 } // fix this
                 None => {
                     trace!("stream ended while waiting for auth response");
-                    return Err(RconError::Io(io::Error::new(io::ErrorKind::ConnectionAborted, "Connection to the server ")));
+                    return Err(Error::Io(io::Error::new(io::ErrorKind::ConnectionAborted, "Connection to the server ")));
                 }
             }
         };
-        Err(RconError::InvalidResponse)
+        Err(Error::InvalidResponse)
     }
-
-    
 }
 
-
-
-type Result<T> = result::Result<T, RconError>;
+type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum RconError {
+pub enum Error {
     Io(io::Error),
     PacketError,
     InvalidResponse,
 }
 
-impl From<IoError> for RconError {
+impl From<IoError> for Error {
     fn from(err: IoError) -> Self {
         Self::Io(err)
     }
 }
 
-impl From<PacketError> for RconError {
+impl From<PacketError> for Error {
     fn from(err: PacketError) -> Self {
         match err {
-            PacketError::InvalidLength => RconError::PacketError,
-            PacketError::UndefinedType => RconError::PacketError,
-            PacketError::Io(e) => RconError::Io(e),
+            PacketError::InvalidLength => Error::PacketError,
+            PacketError::UndefinedType => Error::PacketError,
+            PacketError::Io(e) => Error::Io(e),
         }
     }
 }
 
-impl Display for RconError {
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error>  {
         match self {
-            RconError::Io(e) => {
-                write!(f, "{}", e)?;
+            Error::Io(e) => {
+                write!(f, "Io Error: {}", e)
             },
-            RconError::PacketError => {
-
+            Error::PacketError => {
+                write!(f, "Packet Error")
             },
-            RconError::InvalidResponse => {
-
+            Error::InvalidResponse => {
+                write!(f, "Invalid Response")
             }
         }   
-        Ok(())
     }
 }
 
-impl Error for RconError {}
+impl ErrorTrait for Error {}

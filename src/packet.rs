@@ -56,16 +56,15 @@ impl Display for PacketError {
     fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), fmt::Error>  {
         match self {
             PacketError::Io(e) => {
-                write!(f, "{}", e)?;
+                write!(f, "Io Error: {}", e)
             },
             PacketError::InvalidLength => {
-                
+                write!(f, "Invalid Packet Length")
             },
             PacketError::UndefinedType => {
-
+                write!(f, "Undefined Packet Type ")
             }
         }
-        Ok(())
     }
 }
 
