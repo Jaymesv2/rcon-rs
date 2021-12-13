@@ -9,18 +9,19 @@ use std::time::Duration;
 use tokio::time::sleep;
 use super::packet::*;
 
+/// A [RCON](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol) Connection.
+/// Automatic retries to connect to the server before returning an error.
 pub struct Connection {
     stream: Option<Framed<TcpStream, PacketCodec>>,
     host: SocketAddr,
     password: String,
     authenticated: bool,
     max_retries: u32,
-    /// None = exponential backoff
-    /// in milliseconds
     retry_delay: Duration,
     exponential_backoff: bool,
 }
 
+/// A builder for the connection struct.
 pub struct Builder {
     max_retries: u32,
     retry_delay: Duration,
@@ -28,7 +29,9 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub async fn connect<S: ToSocketAddrs>(self, addr: S, password: String) -> io::Result<Connection> {
+    /// Completes the builder and connects to the rcon server using the specified options by the builder.
+    /// Eargerly connects to the server.
+    pub async fn connect<S: ToSocketAddrs, P: ToString>(self, addr: S, password: P) -> io::Result<Connection> {
         let addr = match lookup_host(addr).await?.next() {
             Some(s) => s,
             None => return Err(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host")),
@@ -37,7 +40,7 @@ impl Builder {
         let mut c = Connection {
             stream: None,
             host: addr,
-            password,
+            password: password.to_string(),
             authenticated: false,
             max_retries: self.max_retries,
             retry_delay: self.retry_delay,
@@ -49,16 +52,19 @@ impl Builder {
         Ok(c)
     }
 
+    /// Sets the maximum number of retries that will be made when calling `Connection::run` before throwing an error.
     pub fn max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
         self
     }
 
+    /// Sets the delay between retries.
     pub fn retry_delay(mut self, retry_delay: Duration) -> Self {
         self.retry_delay = retry_delay;
         self
     }
 
+    /// Sets whether the exponential backoff will be used when trying to reconnect.
     pub fn exponential_backoff(mut self, exponential_backoff: bool) -> Self {
         self.exponential_backoff = exponential_backoff;
         self
@@ -66,14 +72,47 @@ impl Builder {
 }
 
 impl Connection {
+    /// Creates a `Builder` for `Connection`.
     pub fn builder() -> Builder {
         Builder {
             max_retries: 3,
             retry_delay: Duration::from_millis(1000),
             exponential_backoff: false,
-        }   
+        }
     }
+    
+    /// Sends a command to the connected server. 
+    pub async fn run(&mut self, cmd: String) -> io::Result<Packet> {
+        debug!("running command: \"{}\"", &cmd);
+        let pk = Packet {
+            ptype: PacketType::ExecCommand,
+            id: thread_rng().gen::<i32>(),
+            body: cmd,
+        };
+        let stream = if let Some(s) = self.stream.as_mut() {
+            s
+        } else {
+            trace!("reconnecting");
+            self.connect().await?;
+            self.login().await?;
+            self.stream.as_mut().unwrap()
+        };
 
+        stream.send(pk).await?;
+
+        match stream.next().await {
+            Some(Ok(x)) => Ok(x),
+            Some(Err(e)) => Err(e),
+            None => Err(Error::new(
+                ErrorKind::ConnectionAborted,
+                "Server ended the connection",
+            )),
+        }
+    }
+}
+
+// private methods
+impl Connection {
     async fn connect(&mut self) -> io::Result<()> {
         for retries in 1..self.max_retries+1 {
             let s = match TcpStream::connect(self.host).await {
@@ -96,7 +135,6 @@ impl Connection {
         Err(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))
     }
 
-    // maybe check if the client is authenicated before allowing this
     async fn login(&mut self) -> io::Result<()> {
         self.authenticated = false;
         let aid = thread_rng().gen::<i32>();
@@ -140,31 +178,5 @@ impl Connection {
         Err(io::Error::new(io::ErrorKind::InvalidData, "Recieved Invalid data from server"))
     }
 
-    pub async fn run(&mut self, cmd: String) -> io::Result<Packet> {
-        debug!("running command: \"{}\"", &cmd);
-        let pk = Packet {
-            ptype: PacketType::ExecCommand,
-            id: thread_rng().gen::<i32>(),
-            body: cmd,
-        };
-        let stream = if let Some(s) = self.stream.as_mut() {
-            s
-        } else {
-            trace!("reconnecting");
-            self.connect().await?;
-            self.login().await?;
-            self.stream.as_mut().unwrap()
-        };
-
-        stream.send(pk).await?;
-
-        match stream.next().await {
-            Some(Ok(x)) => Ok(x),
-            Some(Err(e)) => Err(e),
-            None => Err(Error::new(
-                ErrorKind::ConnectionAborted,
-                "Server ended the connection",
-            )),
-        }
-    }
+    
 }
