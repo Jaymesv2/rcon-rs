@@ -82,7 +82,7 @@ impl Connection {
     }
     
     /// Sends a command to the connected server. 
-    pub async fn run(&mut self, cmd: String) -> io::Result<String> {
+    pub async fn cmd(&mut self, cmd: String) -> io::Result<String> {
         debug!("running command: \"{}\"", &cmd);
         let pk = Packet {
             ptype: PacketType::ExecCommand,

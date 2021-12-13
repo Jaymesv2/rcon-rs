@@ -10,7 +10,8 @@ pub(crate) mod packet;
 ///         .retry_delay(std::time::Duration::from_millis(1000))
 ///         .exponential_backoff(true)
 ///         .connect("127.0.0.1:22575", "password").await?;
-///     c.run("a command".to_owned()).await?;
+///     let response = c.cmd("a command".to_owned()).await?;
+///     println!("{}", response);
 ///     Ok(())
 /// }
 /// ```
