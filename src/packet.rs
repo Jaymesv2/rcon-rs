@@ -1,6 +1,8 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use std::io::{self, Error, ErrorKind, Read};
+use std::io::{self, Error as IoError, Read};
 use tokio_util::codec::*;
+
+type Result<T> = std::result::Result<T, PacketError>;
 
 #[derive(PartialEq, Debug)]
 pub enum PacketType {
@@ -23,12 +25,53 @@ impl PacketType {
     pub fn bytes(&self) -> i32 {
         match self {
             PacketType::ResponseValue => 0,
+            // I have no clue why both AuthResponse and ExecCommand are both 2 instead of 1 and 2.
+            // part of the rcon spec :/
             PacketType::AuthResponse => 2,
             PacketType::ExecCommand => 2,
             PacketType::Auth => 3,
         }
     }
 }
+
+use std::{
+    error::Error,
+    fmt::{Display, Formatter, self},
+};
+
+#[derive(Debug)]
+pub enum PacketError {
+    InvalidLength,
+    UndefinedType,
+    Io(IoError),
+}
+
+impl From<IoError> for PacketError {
+    fn from(err: IoError) -> Self {
+        Self::Io(err)
+    }
+}
+
+impl Display for PacketError {
+    fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), fmt::Error>  {
+        match self {
+            PacketError::Io(e) => {
+                write!(f, "{}", e)?;
+            },
+            PacketError::InvalidLength => {
+                
+            },
+            PacketError::UndefinedType => {
+
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Error for PacketError {}
+
+
 
 #[derive(Debug)]
 pub struct Packet {
@@ -38,15 +81,12 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn from_bytes(mut b: Bytes, codec: CodecType) -> io::Result<Packet> {
-        if b.remaining() < 10 || b.remaining() > 4096 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Message length was less than the minimum (10 bytes)",
-            ));
+    pub fn from_bytes(mut b: Bytes, codec: CodecType) -> Result<Packet> {
+        if (10..=4096).contains(&b.remaining()) {
+            return Err(PacketError::InvalidLength);
         }
         let msg_id = b.get_i32_le();
-        let ptype = PacketType::from_i32(b.get_i32_le(), codec == CodecType::Server).ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Undefined message id"))?;
+        let ptype = PacketType::from_i32(b.get_i32_le(), codec == CodecType::Server).ok_or(PacketError::UndefinedType)?;
 
         let mut body = String::new();
         let rem = b.remaining() - 2;
@@ -62,10 +102,10 @@ impl Packet {
         &self.body.len() + 10
     }
 
-    pub fn write_bytes(&self, buf: &mut BytesMut) -> usize {
+    pub fn write_bytes(self, buf: &mut BytesMut) -> usize {
         buf.put_i32_le(self.id);
         buf.put_i32_le(self.ptype.bytes());
-        buf.put_slice(self.body.clone().as_bytes());
+        buf.put_slice(self.body.as_bytes());
         buf.put_slice(&[0x00, 0x00]);
         &self.body.len() + 10
     }
@@ -88,6 +128,7 @@ impl PacketCodec {
             max_length,
         }
     }
+    
     #[cfg(feature = "client")]
     pub fn new_client() -> PacketCodec {
         Self::new(CodecType::Client, 4096)
@@ -107,6 +148,8 @@ pub enum CodecType {
 enum DecodeState {
     Head,
     Data(usize),
+    // used when invalid data is recieved and should be ignored.
+    // example: packets longer than 4096 bytes.
     Ignore(usize),
 }
 
@@ -122,9 +165,9 @@ impl Encoder<Packet> for PacketCodec {
 
 impl Decoder for PacketCodec {
     type Item = Packet;
-    type Error = io::Error;
+    type Error = PacketError;
 
-    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>> {
         if src.is_empty() {
             return Ok(None);
         }

@@ -1,13 +1,18 @@
 use futures::{SinkExt, StreamExt};
 use log::*;
 use rand::{thread_rng, Rng};
-use std::io::{self, Error, ErrorKind};
-use tokio::net::{TcpStream, ToSocketAddrs, lookup_host};
-use std::net::SocketAddr;
+use tokio::{net::{TcpStream, ToSocketAddrs, lookup_host}, time::sleep};
 use tokio_util::codec::*;
-use std::time::Duration;
-use tokio::time::sleep;
-use super::packet::*;
+use super::packet::{Packet, PacketCodec, PacketType, PacketError};
+use std::{
+    net::SocketAddr,
+    io::{self, ErrorKind},
+    io::{Error as IoError},
+    error::Error,
+    time::Duration,
+    result,
+    fmt::{Display, Formatter, self},
+};
 
 /// A [RCON](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol) Connection.
 /// Automatic retries to connect to the server before returning an error.
@@ -31,10 +36,10 @@ pub struct Builder {
 impl Builder {
     /// Completes the builder and connects to the rcon server using the specified options by the builder.
     /// Eargerly connects to the server.
-    pub async fn connect<S: ToSocketAddrs, P: ToString>(self, addr: S, password: P) -> io::Result<Connection> {
+    pub async fn connect<S: ToSocketAddrs, P: ToString>(self, addr: S, password: P) -> Result<Connection> {
         let addr = match lookup_host(addr).await?.next() {
             Some(s) => s,
-            None => return Err(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host")),
+            None => return Err(RconError::Io(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))),
         };
 
         let mut c = Connection {
@@ -82,7 +87,7 @@ impl Connection {
     }
     
     /// Sends a command to the connected server. 
-    pub async fn cmd(&mut self, cmd: String) -> io::Result<String> {
+    pub async fn cmd(&mut self, cmd: String) -> Result<String> {
         debug!("running command: \"{}\"", &cmd);
         let pk = Packet {
             ptype: PacketType::ExecCommand,
@@ -102,11 +107,11 @@ impl Connection {
 
         let p = match stream.next().await {
             Some(Ok(x)) => Ok(x),
-            Some(Err(e)) => Err(e),
-            None => Err(Error::new(
+            Some(Err(e)) => Err(RconError::from(e)),
+            None => Err(RconError::Io(IoError::new(
                 ErrorKind::ConnectionAborted,
                 "Server ended the connection",
-            )),
+            ))),
         }?;
         Ok(p.body)
     }
@@ -136,7 +141,7 @@ impl Connection {
         Err(io::Error::new(io::ErrorKind::NotFound, "unable to resolve host"))
     }
 
-    async fn login(&mut self) -> io::Result<()> {
+    async fn login(&mut self) -> Result<()> {
         self.authenticated = false;
         let aid = thread_rng().gen::<i32>();
 
@@ -159,7 +164,7 @@ impl Connection {
                         Ok(())
                     } else {
                         trace!("authentication failed");
-                        Err(io::Error::new(io::ErrorKind::Other, "Incorrect password"))
+                        Err(RconError::Io(IoError::new(io::ErrorKind::Other, "Incorrect password")))
                     };
                 }
                 Some(Ok(_)) => {
@@ -172,12 +177,58 @@ impl Connection {
                 } // fix this
                 None => {
                     trace!("stream ended while waiting for auth response");
-                    return Err(io::Error::new(io::ErrorKind::ConnectionAborted, ""));
+                    return Err(RconError::Io(io::Error::new(io::ErrorKind::ConnectionAborted, "Connection to the server ")));
                 }
             }
         };
-        Err(io::Error::new(io::ErrorKind::InvalidData, "Recieved Invalid data from server"))
+        Err(RconError::InvalidResponse)
     }
 
     
 }
+
+
+
+type Result<T> = result::Result<T, RconError>;
+
+#[derive(Debug)]
+pub enum RconError {
+    Io(io::Error),
+    PacketError,
+    InvalidResponse,
+}
+
+impl From<IoError> for RconError {
+    fn from(err: IoError) -> Self {
+        Self::Io(err)
+    }
+}
+
+impl From<PacketError> for RconError {
+    fn from(err: PacketError) -> Self {
+        match err {
+            PacketError::InvalidLength => RconError::PacketError,
+            PacketError::UndefinedType => RconError::PacketError,
+            PacketError::Io(e) => RconError::Io(e),
+        }
+    }
+}
+
+impl Display for RconError {
+    fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error>  {
+        match self {
+            RconError::Io(e) => {
+                write!(f, "{}", e)?;
+            },
+            RconError::PacketError => {
+
+            },
+            RconError::InvalidResponse => {
+
+            }
+        }   
+        Ok(())
+    }
+}
+
+impl Error for RconError {}
