@@ -1,9 +1,6 @@
 #[warn(missing_docs)]
 
-#[cfg(feature = "packet")]
-pub mod packet;
-#[cfg(feature = "packet")]
-pub use packet::Packet;
+pub(crate) mod packet;
 /// A [RCON](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol) connection for interacting with remote servers.
 /// ```
 /// #[tokio::main]
